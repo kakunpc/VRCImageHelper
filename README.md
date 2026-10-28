@@ -21,7 +21,7 @@ VRChatのカメラで撮った画像を圧縮して、
 ### インストール
 
 1. インストーラを[Releases](https://github.com/m-hayabusa/VRCImageHelper/releases/)からダウンロードし、インストールする  
-(インストール中に "You must install or update .NET to run this application." から始まるメッセージが出てきた場合、「はい」をクリックすると必要なライブラリ (.NET 6.0 Desktop Runtime) のダウンロードページが開くので、それをインストールしてからもう一度VRCImageHelperのインストール操作をしてください)
+(インストール中に "You must install or update .NET to run this application." から始まるメッセージが出てきた場合、「はい」をクリックすると必要なライブラリ (.NET 10.0 Desktop Runtime (x64)) のダウンロードページが開くので、それをインストールしてからもう一度VRCImageHelperのインストール操作をしてください)
 
 2. インストール中に設定画面が出てくるので、設定する  
     ![設定画面](https://github.com/m-hayabusa/VRCImageHelper/assets/10593623/8b2b56e3-f31e-4017-9c99-e2ce636e8bfd)
@@ -105,3 +105,58 @@ Windowsの 設定/アプリ/インストールされているアプリ からア
 内部でexiftool.exeとffmpeg.exeを利用するが、環境変数 PATH に設定されたディレクトリ内に見つからなければ、自動でダウンロードするので、こだわりがなければ用意する必要はない。自動でダウンロードされるものは:
 * ExifTool: https://sourceforge.net/projects/exiftool/files/latest/download
 * ffmpeg: https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip
+
+
+### 開発・ビルド (.NET 10)
+
+対象は Windows Forms (`net10.0-windows10.0.19041.0`)。Windows SDK の対象バージョン、設定JSON、画像処理、OSC、通知のコードと既存パッケージのバージョンは維持している。
+`global.json` は正式版 .NET 10.0 SDK を選択し、インストール済みの最新feature band / patchを利用する。SDKはビルド用で、実行先に必要なのはDesktop Runtime。
+アプリのRIDは `win-x64`、`SelfContained` は `false` を明示し、MSIのx64前提条件と一致させている。
+
+アプリ本体のビルド (Windows / macOS):
+
+```sh
+dotnet restore VRCImageHelper/VRCImageHelper.csproj -p:EnableWindowsTargeting=true
+dotnet build VRCImageHelper/VRCImageHelper.csproj -c Release -p:EnableWindowsTargeting=true --no-restore
+```
+
+Windows x64向け、ランタイム非同梱の配布ファイル生成:
+
+```sh
+dotnet publish VRCImageHelper/VRCImageHelper.csproj -c Release -r win-x64 --self-contained false -p:EnableWindowsTargeting=true
+```
+
+出力先は `VRCImageHelper/bin/Release/net10.0-windows10.0.19041.0/win-x64/publish/`。
+実行先には .NET 10 Desktop Runtime (x64) が必要。macOSでのビルド・publish成功はWindowsでの動作確認を意味しない。
+
+MSIはWindows上の .NET 10対応Visual StudioとVisual Studio Installer Projects拡張でビルドする。
+`Setup/Setup.vdproj` は従来のPublish Itemsとカスタムアクションを維持し、Debug/Releaseとも .NET 10 Desktop Runtime (x64) を前提条件に指定している。
+ビルド環境のPrerequisitesに当該ランタイムのbootstrapperパッケージがあることを確認すること。MacではそのパッケージIDの存在とMSIのランタイム検出は検証できていない。
+アプリとMSIの製品バージョンは既存の `0.9.9` のまま。新しいMSIとして配布する際は、既存版からのアップグレード用に製品バージョン・ProductCode・PackageCodeをWindowsで管理し、更新テストを行うこと。
+`.vdproj` は `dotnet build` ではビルドできないため、上記CLIコマンドはアプリの `.csproj` を対象としている。
+
+2026-10-28の移行検証 (macOS arm64 / SDK 10.0.403):
+
+* restore、Debug / Releaseビルド、Windows x64向けframework-dependent publishが成功。
+* 出力exeがWindows x64 (PE32+) で、runtimeconfigが `Microsoft.WindowsDesktop.App` / `Microsoft.NETCore.App` 10.0.0を要求することを確認。
+* NuGetの直接・間接依存の脆弱性監査では、使用ソース (`https://api.nuget.org/v3/index.json`) に既知の脆弱性報告なし。将来の安全性を保証するものではない。
+* `Rug.Osc 1.2.5` の `NU1701` (.NET Framework向け依存) と、既存コードのnullable / 型名警告が残る。警告は抑制していない。
+* 元リポジトリに自動テストプロジェクト・CIはない。Windows GUIの実行とMSIの生成・インストール検証は未実施。
+
+Windowsでのリリース前確認:
+
+* 既存config.jsonの読み込み・保存、日本語/英語の設定画面、100%/150%/200% DPIでの配置。
+* 常駐アイコン、通知表示とクリック、自動起動の登録・解除、終了。
+* コピーしたサンプル画像でPNG/JPEG/WEBP/AVIF、透過画像、Exifとファイル名、既存設定での処理結果を比較。
+* VRChatログ監視、OSCQuery discoveryとOSC受信、VirtualLens2 / Integralのメタデータ。
+* .NET 6のみの環境と .NET 10 Desktop Runtime (x64) の環境で、setup.exeの前提条件、MSIのインストール・更新・アンインストール。
+
+移行時に参照したMicrosoft公式資料:
+
+* [.NET移行の概要](https://learn.microsoft.com/en-us/dotnet/core/porting/)
+* 互換性変更一覧: [.NET 7](https://learn.microsoft.com/en-us/dotnet/core/compatibility/7.0)、[8](https://learn.microsoft.com/en-us/dotnet/core/compatibility/8.0)、[9](https://learn.microsoft.com/en-us/dotnet/core/compatibility/9.0)、[10](https://learn.microsoft.com/en-us/dotnet/core/compatibility/10)
+* [macOSでのWindowsターゲットのビルド](https://learn.microsoft.com/en-us/dotnet/core/tools/sdk-errors/netsdk1100)
+* [global.json](https://learn.microsoft.com/en-us/dotnet/core/tools/global-json)
+* [Installer Projectsと.NET (Publish Items / Desktop Runtime前提条件)](https://learn.microsoft.com/en-us/visualstudio/deployment/installer-projects-net-core)
+
+WinFormsのDPIスケーリング変更はWindowsで要確認。BinaryFormatterの実行コードやシリアライズ済みオブジェクトのリソースはなく、危険な互換モードの有効化は不要だった。
