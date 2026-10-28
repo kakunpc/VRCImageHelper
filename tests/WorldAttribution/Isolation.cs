@@ -19,5 +19,10 @@ internal static class LogReader
 internal static class ImageProcessor
 {
     internal static readonly ConcurrentDictionary<string, State> Processed = new();
-    internal static void ProcessImage(string path, State state) => Processed[path] = state.Clone();
+    internal static Action<string>? BeforeProcess;
+    internal static void ProcessImage(string path, State state)
+    {
+        BeforeProcess?.Invoke(path);
+        Processed[path] = state.Clone();
+    }
 }

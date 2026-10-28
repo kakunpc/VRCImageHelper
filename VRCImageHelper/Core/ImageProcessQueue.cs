@@ -40,6 +40,10 @@ internal static class ImageProcessQueue
     private static readonly Timer s_timer;
     private static readonly WorldHistory s_history = new(LogReader.LogDirectory);
     private static bool s_initialized;
+    private static bool s_scanAll;
+    private static readonly StringComparer s_pathComparer = OperatingSystem.IsWindows()
+        ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+    private static readonly HashSet<string> s_completedPaths = new(s_pathComparer);
 
     private static DateTime s_ignoreBefore;
     private static readonly object s_lockObject = new();
@@ -49,6 +53,7 @@ internal static class ImageProcessQueue
     // 初期化メソッドを追加
     public static void Initialize(bool scanAll = false)
     {
+        s_scanAll = scanAll;
         s_ignoreBefore = LoadLastProcessedTime(scanAll) + TimeSpan.FromMilliseconds(1);
         s_initialized = true;
         ResetTimer();
@@ -113,11 +118,12 @@ internal static class ImageProcessQueue
 
     public static void Enqueue(string path, State? state = null)
     {
+        path = Path.GetFullPath(path);
         if (ParseDate.TryParseFilePathToDateTime(path, out var timestamp))
         {
             lock (s_lockObject)
             {
-                if (timestamp < s_ignoreBefore)
+                if (timestamp < s_ignoreBefore || s_completedPaths.Contains(path))
                 {
                     return;
                 }
@@ -127,7 +133,7 @@ internal static class ImageProcessQueue
                     s_queue[timestamp] = new LinkedList<QueueTask>();
                 }
 
-                if (!s_queue[timestamp].Any(item => item.path == path))
+                if (!s_queue[timestamp].Any(item => s_pathComparer.Equals(item.path, path)))
                 {
                     s_queue[timestamp].AddLast(new QueueTask(path) { state = state });
                 }
@@ -137,7 +143,7 @@ internal static class ImageProcessQueue
                     var node = s_queue[timestamp].First;
                     while (node != null)
                     {
-                        if (node.Value.path == path && node.Value.state == null)
+                        if (s_pathComparer.Equals(node.Value.path, path) && node.Value.state == null)
                         {
                             var updated = node.Value;
                             updated.SetState(state);
@@ -163,7 +169,7 @@ internal static class ImageProcessQueue
         }
         try
         {
-            s_history.Refresh();
+            s_history.Refresh(s_scanAll);
         }
         catch (IOException ex)
         {
@@ -222,9 +228,11 @@ internal static class ImageProcessQueue
                             using (s_compressSemaphore?.Wait())
                             {
                                 Debug.WriteLine($"画像処理: 開始: {item.path}");
+                                var succeeded = false;
                                 try
                                 {
                                     ImageProcessor.ProcessImage(item.path, state);
+                                    succeeded = true;
                                 }
                                 catch (Exception ex)
                                 {
@@ -234,6 +242,9 @@ internal static class ImageProcessQueue
                                 {
                                     lock (s_lockObject)
                                     {
+                                        // Record success before removing the queued item, so a
+                                        // delayed file/log notification cannot schedule it again.
+                                        if (succeeded) s_completedPaths.Add(item.path);
                                         if (s_queue.TryGetValue(key, out var currentTaskList))
                                         {
                                             var nodeToRemove = currentTaskList.First;

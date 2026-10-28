@@ -148,6 +148,49 @@ try
         Check(FileWatcher.EnumeratePhotosSince(photos, new DateTime(2026, 10, 31, 23, 40, 0)).SequenceEqual(new[] { p1, p2, p3 }), "photo scan order/threshold");
     });
 
+    Group("normal refresh opens only logs updated today or yesterday; scanAll includes older logs", directory =>
+    {
+        var today = At(29, 0, 0);
+        var older = WriteLog(directory, At(26, 0, 0), Join(At(26, 12, 0), "C"));
+        var yesterday = WriteLog(directory, At(28, 0, 0), Join(At(28, 12, 0), "A"));
+        var current = WriteLog(directory, today, Join(At(29, 0, 20), "B"));
+        File.SetLastWriteTime(older, At(27, 23, 59, 59));
+        File.SetLastWriteTime(yesterday, At(28, 0, 0));
+        File.SetLastWriteTime(current, At(29, 0, 21));
+        var history = new WorldHistory(directory);
+        // An exclusive lock proves the old file isn't even opened in normal mode.
+        using (File.Open(older, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            history.Refresh(today: today);
+            Check(!history.TryCreatePhotoState(At(26, 12, 1), null, out _), "old history must be excluded");
+            World(history, At(28, 12, 1), "A");
+            World(history, afterMove, "B");
+        }
+        history.Refresh(scanAll: true, today: today);
+        World(history, At(26, 12, 1), "C");
+        history.Refresh(today: today);
+        Check(!history.TryCreatePhotoState(At(26, 12, 1), null, out _), "normal mode must evict previously cached old logs");
+    });
+    Group("normal history window rolls forward at local midnight", directory =>
+    {
+        var path = WriteLog(directory, At(27, 0, 0), Join(At(27, 12, 0), "A"));
+        File.SetLastWriteTime(path, At(27, 23, 59));
+        var history = new WorldHistory(directory);
+        history.Refresh(today: At(28, 0, 0));
+        World(history, At(27, 12, 1), "A");
+        using (File.Open(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            history.Refresh(today: At(29, 0, 0));
+        Check(!history.TryCreatePhotoState(At(27, 12, 1), null, out _), "expired history must leave the cache");
+    });
+    Group("recently updated long-running session retains its earlier world", directory =>
+    {
+        var path = WriteLog(directory, At(26, 0, 0), Join(At(26, 12, 0), "A") + Line(afterMidnight, "still running"));
+        File.SetLastWriteTime(path, afterMidnight);
+        var history = new WorldHistory(directory);
+        history.Refresh(today: At(29, 0, 0));
+        World(history, afterMidnight, "A");
+    });
+
     Directory.CreateDirectory(LogReader.LogDirectory);
     var queueLog = WriteLog(LogReader.LogDirectory, At(28, 23, 40), OriginalScenario());
     var photoRoot = Path.Combine(TestEnvironment.Root, "queue-photos");
@@ -171,10 +214,38 @@ try
     groups++;
 
     ImageProcessor.Processed.Clear();
-    ImageProcessQueue.Enqueue(middle);
+    for (var duplicate = 0; duplicate < 3; duplicate++)
+    {
+        ImageProcessQueue.Enqueue(last);
+        ScreenshotWatcher.OnNewLogLine(new object(), new NewLineEventArgs(Line(afterMove, "[VRC Camera] Took screenshot to: " + last).TrimEnd('\n')));
+        await Task.WhenAll(ImageProcessQueue.CheckQueue());
+    }
+    Check(ImageProcessor.Processed.Count == 0 && ImageProcessQueue.s_queue.Count == 0, "completed latest photo must not run again on repeated FS/log notifications");
+    Console.WriteLine("PASS completed latest photo ignores repeated file and screenshot notifications");
+    groups++;
+
+    var sameTime = Path.Combine(Path.GetDirectoryName(last)!, Path.GetFileNameWithoutExtension(last) + "_Alpha.png");
+    File.Copy(last, sameTime);
+    var delayed = Photo(photoRoot, At(29, 0, 9));
+    ImageProcessQueue.Enqueue(sameTime);
+    ImageProcessQueue.Enqueue(delayed);
+    ImageProcessQueue.Enqueue(Path.Combine(Path.GetDirectoryName(last)!, ".", Path.GetFileName(last)));
+    if (OperatingSystem.IsWindows()) ImageProcessQueue.Enqueue(last.ToUpperInvariant());
     await Task.WhenAll(ImageProcessQueue.CheckQueue());
-    Check(ImageProcessor.Processed[middle].RoomInfo.World_id == "wrld_A", "reprocessing is idempotent");
-    Console.WriteLine("PASS actual queue reprocessing remains World A");
+    Check(ImageProcessor.Processed.Count == 2 && ImageProcessor.Processed.ContainsKey(sameTime) && ImageProcessor.Processed.ContainsKey(delayed), "distinct same-time and late older photos must run; path aliases must not");
+    Console.WriteLine("PASS duplicate path aliases are ignored without dropping same-time or late older photos");
+    groups++;
+
+    var retry = Photo(photoRoot, At(29, 0, 12));
+    ImageProcessor.BeforeProcess = _ => throw new IOException("simulated processing failure");
+    ImageProcessQueue.Enqueue(retry);
+    await Task.WhenAll(ImageProcessQueue.CheckQueue());
+    Check(!ImageProcessor.Processed.ContainsKey(retry), "failed processing must not report success");
+    ImageProcessor.BeforeProcess = null;
+    ImageProcessQueue.Enqueue(retry);
+    await Task.WhenAll(ImageProcessQueue.CheckQueue());
+    Check(ImageProcessor.Processed.ContainsKey(retry), "failure must not mark the photo as completed");
+    Console.WriteLine("PASS failed processing can retry on a later notification");
     groups++;
 
     File.Delete(queueLog);

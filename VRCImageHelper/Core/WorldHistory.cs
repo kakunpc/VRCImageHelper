@@ -15,14 +15,20 @@ internal sealed class WorldHistory(string directory)
     private volatile List<Session> _sessions = [];
     private readonly object _refreshLock = new();
 
-    internal void Refresh()
+    internal void Refresh(bool scanAll = false, DateTime? today = null)
     {
-        lock (_refreshLock) RefreshCore();
+        var day = (today ?? DateTime.Today).Date;
+        lock (_refreshLock) RefreshCore(scanAll, day);
     }
 
-    private void RefreshCore()
+    private void RefreshCore(bool scanAll, DateTime today)
     {
-        var files = Directory.EnumerateFiles(directory, "output_log_*.txt").Select(path => new FileInfo(path)).ToList();
+        // Filter metadata before opening any log. Last write time also includes
+        // sessions that started earlier but are still active today.
+        var files = Directory.EnumerateFiles(directory, "output_log_*.txt")
+            .Select(path => new FileInfo(path))
+            .Where(file => scanAll || (file.LastWriteTime >= today.AddDays(-1) && file.LastWriteTime < today.AddDays(1)))
+            .ToList();
         var present = files.Select(file => file.FullName).ToHashSet(_cache.Comparer);
         foreach (var removed in _cache.Keys.Where(path => !present.Contains(path)).ToList())
             _cache.Remove(removed);
