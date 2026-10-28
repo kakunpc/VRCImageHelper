@@ -38,6 +38,21 @@ try {
     Check ((Property $third 'ProductCode') -ne (Property $second 'ProductCode')) 'Different versions share ProductCode.'
     & "$root/scripts/Set-ReleaseVersion.ps1" -Tag v255.255.65535 -Root $fixture | Out-Null
     Check ((Property ([IO.File]::ReadAllText("$fixture/Setup/Setup.vdproj")) 'ProductVersion') -eq '255.255.65535') 'MSI maximum version rejected.'
+    # Test the native summary update on an empty disposable MSI, without any
+    # install operation or custom action.
+    $msi = Join-Path $fixture 'summary-test.msi'
+    $installer = New-Object -ComObject WindowsInstaller.Installer
+    $database = $installer.OpenDatabase($msi, 3)
+    $database.Commit()
+    [Runtime.InteropServices.Marshal]::FinalReleaseComObject($database) | Out-Null
+    & "$root/scripts/Set-MsiPackageFlags.ps1" -Path $msi
+    $database = $installer.OpenDatabase($msi, 0)
+    $summary = $database.GetType().InvokeMember('SummaryInformation', [Reflection.BindingFlags]::GetProperty, $null, $database, @([int]0))
+    $flags = $summary.GetType().InvokeMember('Property', [Reflection.BindingFlags]::GetProperty, $null, $summary, @([int]15))
+    Check ($flags -eq 10) 'Per-user package flags did not persist.'
+    [Runtime.InteropServices.Marshal]::FinalReleaseComObject($summary) | Out-Null
+    [Runtime.InteropServices.Marshal]::FinalReleaseComObject($database) | Out-Null
+    [Runtime.InteropServices.Marshal]::FinalReleaseComObject($installer) | Out-Null
     Write-Host 'PASS release version validation, app/MSI alignment, upgrade identity and rerun identities (isolated files only).'
 } finally {
     # This is the GUID-named directory created above, never a supplied path.

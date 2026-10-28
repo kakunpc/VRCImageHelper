@@ -34,10 +34,7 @@ function Get-ComProperty($Object, [string]$Name, [object[]]$Arguments) {
 }
 # Preserve the existing MsiInfo.exe -w 10 hook without depending on one SDK's
 # installation path: compressed package (2) + per-user/LUA package (8).
-$summary = Get-ComProperty $installer 'SummaryInformation' @($msi, [int]1)
-$summary.GetType().InvokeMember('Property', [Reflection.BindingFlags]::SetProperty, $null, $summary, @([int]15, [int]10)) | Out-Null
-$summary.Persist()
-[Runtime.InteropServices.Marshal]::FinalReleaseComObject($summary) | Out-Null
+& "$PSScriptRoot/Set-MsiPackageFlags.ps1" -Path $msi
 $database = $installer.OpenDatabase($msi, 0)
 $summary = Get-ComProperty $database 'SummaryInformation' @([int]0)
 function Read-MsiProperty([string]$Name) {
