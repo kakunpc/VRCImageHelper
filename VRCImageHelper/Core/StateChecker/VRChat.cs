@@ -5,18 +5,20 @@ using System.Text.RegularExpressions;
 
 internal static class VRChat
 {
-    public static void WorldId(object sender, NewLineEventArgs e)
+    public static void WorldId(object sender, NewLineEventArgs e) => ApplyWorldId(State.Current, e.Line);
+
+    internal static bool ApplyWorldId(State state, string line)
     {
-        var match = Regex.Match(e.Line, @"(?<DateTime>\d+\.\d+\.\d+ \d+:\d+:\d+) .*\[Behaviour\] Joining (?<WorldID>wrld_[^:]+):(?<InstanceID>[^~]*)(?:~(?<Options>.*))?$");
+        var match = Regex.Match(line, @"(?<DateTime>\d+\.\d+\.\d+ \d+:\d+:\d+) .*\[Behaviour\] Joining (?<WorldID>wrld_[^:]+):(?<InstanceID>[^~]*)(?:~(?<Options>.*))?$");
         if (match.Success)
         {
             Debug.WriteLine($"Joining {match.Groups["WorldID"]}, {match.Groups["InstanceID"]}, {match.Groups["Options"]}");
-            if (!(State.Current.RoomInfo.Instance_id == match.Groups["InstanceID"].Value && State.Current.RoomInfo.World_id == match.Groups["WorldID"].Value))
+            if (!(state.RoomInfo.Instance_id == match.Groups["InstanceID"].Value && state.RoomInfo.World_id == match.Groups["WorldID"].Value))
             {
-                State.Current.RoomInfo.JoinDateTime = match.Groups["DateTime"].Value;
+                state.RoomInfo.JoinDateTime = match.Groups["DateTime"].Value;
             }
-            State.Current.RoomInfo.World_id = match.Groups["WorldID"].Value;
-            State.Current.RoomInfo.Instance_id = match.Groups["InstanceID"].Value;
+            state.RoomInfo.World_id = match.Groups["WorldID"].Value;
+            state.RoomInfo.Instance_id = match.Groups["InstanceID"].Value;
 
             if (match.Groups["Options"].Success)
             {
@@ -26,8 +28,8 @@ internal static class VRChat
                     return new[] { match.Groups[1].Value, match.Groups[2].Value };
                 });
 
-                State.Current.RoomInfo.Permission = "public";
-                State.Current.RoomInfo.Organizer = "public";
+                state.RoomInfo.Permission = "public";
+                state.RoomInfo.Organizer = "public";
 
                 foreach (var option in options)
                 {
@@ -36,57 +38,67 @@ internal static class VRChat
 
                     if (key == "private" || key == "friends" || key == "hidden" || key == "group")
                     {
-                        State.Current.RoomInfo.Permission = key;
-                        State.Current.RoomInfo.Organizer = value;
+                        state.RoomInfo.Permission = key;
+                        state.RoomInfo.Organizer = value;
                     }
 
                     if (key == "canRequestInvite")
                     {
-                        State.Current.RoomInfo.Permission += "_plus";
+                        state.RoomInfo.Permission += "_plus";
                     }
 
                     if (key == "groupAccessType")
                     {
-                        State.Current.RoomInfo.Permission += "_" + value;
+                        state.RoomInfo.Permission += "_" + value;
                     }
                 }
             } else
             {
-                State.Current.RoomInfo.Permission = "public";
-                State.Current.RoomInfo.Organizer = "public";
+                state.RoomInfo.Permission = "public";
+                state.RoomInfo.Organizer = "public";
             }
-            State.Current.Players.Clear();
+            state.Players.Clear();
         }
+        return match.Success;
     }
 
-    public static void JoinRoom(object sender, NewLineEventArgs e)
+    public static void JoinRoom(object sender, NewLineEventArgs e) => ApplyJoinRoom(State.Current, e.Line);
+
+    internal static bool ApplyJoinRoom(State state, string line)
     {
-        var match = Regex.Match(e.Line, "\\[Behaviour\\] Joining or Creating Room: (.*)");
+        var match = Regex.Match(line, "\\[Behaviour\\] Joining or Creating Room: (.*)");
         if (match.Success)
         {
             Debug.WriteLine($"Joining {match.Groups[1]}");
-            State.Current.RoomInfo.World_name = match.Groups[1].Value;
+            state.RoomInfo.World_name = match.Groups[1].Value;
         }
+        return match.Success;
     }
 
-    public static void PlayerJoin(object sender, NewLineEventArgs e)
+    public static void PlayerJoin(object sender, NewLineEventArgs e) => ApplyPlayerJoin(State.Current, e.Line);
+
+    internal static bool ApplyPlayerJoin(State state, string line)
     {
-        var match = Regex.Match(e.Line, "\\[Behaviour\\] OnPlayerJoined (.*?) \\((usr_.*)\\)");
+        var match = Regex.Match(line, "\\[Behaviour\\] OnPlayerJoined (.*?) \\((usr_.*)\\)");
         if (match.Success)
         {
             Debug.WriteLine($"Join {match.Groups[1]}, {match.Groups[2]}");
-            State.Current.Players.Add(match.Groups[1].Value);
+            state.Players.Add(match.Groups[1].Value);
         }
+        return match.Success;
     }
 
-    public static void PlayerLeft(object sender, NewLineEventArgs e)
+    public static void PlayerLeft(object sender, NewLineEventArgs e) => ApplyPlayerLeft(State.Current, e.Line);
+
+    internal static bool ApplyPlayerLeft(State state, string line)
     {
-        var match = Regex.Match(e.Line, "\\[Behaviour\\] OnPlayerLeft (.*) \\((usr_.*)\\)");
+        var match = Regex.Match(line, "\\[Behaviour\\] OnPlayerLeft (.*) \\((usr_.*)\\)");
         if (match.Success)
         {
             Debug.WriteLine($"Left {match.Groups[1]}, {match.Groups[2]}");
-            State.Current.Players.Remove(match.Groups[1].Value);
+            state.Players.Remove(match.Groups[1].Value);
         }
+        return match.Success;
     }
 
     public static void Quit(object sender, NewLineEventArgs e)

@@ -27,6 +27,7 @@ internal struct QueueTask
     public string path;
     public bool isProcessing = false;
     public State? state = null;
+    public bool historyUnavailableReported = false;
 }
 
 /// <summary>
@@ -37,8 +38,10 @@ internal static class ImageProcessQueue
     public static SemaphoreSlimWrapper? s_compressSemaphore;
     public static SortedDictionary<DateTime, LinkedList<QueueTask>> s_queue = new();
     private static readonly Timer s_timer;
+    private static readonly WorldHistory s_history = new(LogReader.LogDirectory);
+    private static bool s_initialized;
 
-    private static DateTime s_lastEnqueuedTime;
+    private static DateTime s_ignoreBefore;
     private static readonly object s_lockObject = new();
     private static readonly string s_lastProcessedTimeFile = "last_processed_time.txt";
 
@@ -46,7 +49,9 @@ internal static class ImageProcessQueue
     // 初期化メソッドを追加
     public static void Initialize(bool scanAll = false)
     {
-        s_lastEnqueuedTime = LoadLastProcessedTime(scanAll) + TimeSpan.FromMilliseconds(1);
+        s_ignoreBefore = LoadLastProcessedTime(scanAll) + TimeSpan.FromMilliseconds(1);
+        s_initialized = true;
+        ResetTimer();
     }
 
     static ImageProcessQueue()
@@ -59,7 +64,6 @@ internal static class ImageProcessQueue
         {
             s_compressSemaphore = new SemaphoreSlimWrapper(ConfigManager.ParallelCompressionProcesses, ConfigManager.ParallelCompressionProcesses);
         }
-        ResetTimer();
     }
 
     private static void SaveLastProcessedTime(DateTime time)
@@ -102,6 +106,7 @@ internal static class ImageProcessQueue
 
     private static void ResetTimer()
     {
+        if (!s_initialized) return;
         s_timer.Stop();
         s_timer.Start();
     }
@@ -112,7 +117,7 @@ internal static class ImageProcessQueue
         {
             lock (s_lockObject)
             {
-                if (timestamp < s_lastEnqueuedTime)
+                if (timestamp < s_ignoreBefore)
                 {
                     return;
                 }
@@ -125,7 +130,6 @@ internal static class ImageProcessQueue
                 if (!s_queue[timestamp].Any(item => item.path == path))
                 {
                     s_queue[timestamp].AddLast(new QueueTask(path) { state = state });
-                    s_lastEnqueuedTime = timestamp;
                 }
                 else if (state != null)
                 {
@@ -148,9 +152,29 @@ internal static class ImageProcessQueue
         }
     }
 
-    public static void CheckQueue()
+    public static Task[] CheckQueue()
     {
         ResetTimer();
+        var scheduled = new List<Task>();
+
+        lock (s_lockObject)
+        {
+            if (s_queue.Count == 0) return [];
+        }
+        try
+        {
+            s_history.Refresh();
+        }
+        catch (IOException ex)
+        {
+            Debug.WriteLine($"World history unavailable; photos remain queued: {ex.Message}");
+            return [];
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            Debug.WriteLine($"World history unavailable; photos remain queued: {ex.Message}");
+            return [];
+        }
 
         var currentLogTime = LogReader.CurrentHead;
 
@@ -179,13 +203,20 @@ internal static class ImageProcessQueue
                     if (node != null)
                     {
                         var updatedItem = node.Value;
+                        if (!s_history.TryCreatePhotoState(key, item.state, out var state))
+                        {
+                            if (!updatedItem.historyUnavailableReported)
+                                Debug.WriteLine($"No world history at photo time; leaving untouched: {item.path}");
+                            updatedItem.historyUnavailableReported = true;
+                            node.Value = updatedItem;
+                            continue;
+                        }
                         updatedItem.SetIsProcessing(true);
                         node.Value = updatedItem;
 
-                        var state = item.state ?? State.Current.Clone();
                         state.CreationDate = MetadataArguments.FormatCreationDate(key);
 
-                        Task.Run(() =>
+                        scheduled.Add(Task.Run(() =>
                         {
                             Debug.WriteLine($"画像処理: 待機中: {item.path}");
                             using (s_compressSemaphore?.Wait())
@@ -230,10 +261,11 @@ internal static class ImageProcessQueue
                                     }
                                 }
                             }
-                        });
+                        }));
                     }
                 }
             }
         }
+        return scheduled.ToArray();
     }
 }

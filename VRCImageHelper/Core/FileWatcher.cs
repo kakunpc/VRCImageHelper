@@ -78,16 +78,20 @@ internal class FileWatcher : IDisposable
 
     private void AddAllFileToQueueAfterDate(DateTime threshold)
     {
-        var files = Directory.EnumerateDirectories(_targetDirectory)
+        foreach (var path in EnumeratePhotosSince(_targetDirectory, threshold))
+            ImageProcessQueue.Enqueue(path);
+    }
+
+    internal static IEnumerable<string> EnumeratePhotosSince(string directory, DateTime threshold)
+    {
+        return Directory.EnumerateDirectories(directory)
             .Select(dir => new { dir, sucess = ParseDate.TryParseDirectoryPathToDateTime(dir, out var date), date })
             .Where(x => x.sucess && (x.date >= threshold || (x.date.Year == threshold.Year && x.date.Month == threshold.Month))) // dateには月始めの日が入るので、「月が同じか、時刻が先のとき」になる
             .SelectMany(x => Directory.EnumerateFiles(x.dir, "*.png"))
             .Select(file => new { file, success = ParseDate.TryParseFilePathToDateTime(file, out var date), date })
-            .Where(x => x.success && x.date >= threshold);
-
-        foreach (var entry in files)
-        {
-            ImageProcessQueue.Enqueue(entry.file);
-        }
+            .Where(x => x.success && x.date >= threshold)
+            .OrderBy(x => x.date)
+            .ThenBy(x => x.file, StringComparer.Ordinal)
+            .Select(x => x.file);
     }
 }
