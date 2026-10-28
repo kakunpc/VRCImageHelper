@@ -29,16 +29,17 @@ foreach ($file in @($msi, $bootstrapper)) {
 }
 # Inspect the MSI database without running install/custom actions.
 $installer = New-Object -ComObject WindowsInstaller.Installer
-$database = $installer.OpenDatabase($msi, 1)
 function Get-ComProperty($Object, [string]$Name, [object[]]$Arguments) {
     return $Object.GetType().InvokeMember($Name, [Reflection.BindingFlags]::GetProperty, $null, $Object, $Arguments)
 }
 # Preserve the existing MsiInfo.exe -w 10 hook without depending on one SDK's
 # installation path: compressed package (2) + per-user/LUA package (8).
-$summary = Get-ComProperty $database 'SummaryInformation' @([int]1)
+$summary = Get-ComProperty $installer 'SummaryInformation' @($msi, [int]1)
 $summary.GetType().InvokeMember('Property', [Reflection.BindingFlags]::SetProperty, $null, $summary, @([int]15, [int]10)) | Out-Null
 $summary.Persist()
-$database.Commit()
+[Runtime.InteropServices.Marshal]::FinalReleaseComObject($summary) | Out-Null
+$database = $installer.OpenDatabase($msi, 0)
+$summary = Get-ComProperty $database 'SummaryInformation' @([int]0)
 function Read-MsiProperty([string]$Name) {
     $view = $database.OpenView("SELECT ``Value`` FROM ``Property`` WHERE ``Property``='$Name'")
     $view.Execute()
@@ -49,7 +50,8 @@ function Read-MsiProperty([string]$Name) {
 if ((Read-MsiProperty 'ProductVersion') -ne $Version) { throw 'MSI version mismatch.' }
 if ((Read-MsiProperty 'UpgradeCode') -ne '{A68DD4DB-3CB4-400D-AB4C-9EC599156F0D}') { throw 'MSI UpgradeCode changed.' }
 if ((Get-ComProperty $summary 'Property' @([int]7)) -notmatch '^x64;') { throw 'MSI must target x64.' }
-if ((Get-ComProperty $summary 'Property' @([int]15)) -ne 10) { throw 'MSI per-user package flags mismatch.' }
+$flags = Get-ComProperty $summary 'Property' @([int]15)
+if ($flags -ne 10) { throw "MSI per-user package flags mismatch: $flags (expected 10)." }
 $view = $database.OpenView('SELECT `FileName` FROM `File`')
 $view.Execute()
 $files = @(); while ($record = $view.Fetch()) { $files += ((Get-ComProperty $record 'StringData' @([int]1)).Split('|')[-1]) }
