@@ -41,11 +41,11 @@ internal static class VirtualLens2
         {
             args.Add("-:Make=logilabo");
             args.Add("-:Model=VirtualLens2");
-            args.Add($"-:FocalLength={state.FocalLength}");
+            args.Add(FormattableString.Invariant($"-:FocalLength={state.FocalLength}"));
             if (!float.IsInfinity(state.ApertureValue))
-                args.Add($"-:FNumber={state.ApertureValue}");
+                args.Add(FormattableString.Invariant($"-:FNumber={state.ApertureValue}"));
             if (!float.IsInfinity(state.ExposureBias))
-                args.Add($"-:ExposureCompensation={state.ExposureBias}");
+                args.Add(FormattableString.Invariant($"-:ExposureCompensation={state.ExposureBias}"));
         }
         return args;
     }

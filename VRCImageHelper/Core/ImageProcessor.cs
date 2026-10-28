@@ -4,7 +4,6 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
-using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.Encodings.Web;
@@ -412,7 +411,7 @@ internal class ImageProcessor
             )
         );
 
-        var args = BuildMetadataArgs(desc, makernote, state);
+        var args = MetadataArguments.Build(desc, makernote, state);
 
         // 純正で書き込まれるようになったXMPをまるごとコピーする
         ExifTool.Copy(sourcePath, path)?.Wait();
@@ -446,56 +445,6 @@ internal class ImageProcessor
         }
     }
 
-    private static List<string> BuildMetadataArgs(string desc, string makernote, State state)
-    {
-        var args = new List<string>
-        {
-            "-n",
-            "-overwrite_original",
-            "-codedcharacterset=utf8",
-            $"-:ImageDescription={desc}",
-            $"-:Description={desc}",
-            $"-:Comment={desc}",
-            $"-makernote={makernote}",
-            "-sep \";\"",
-            $"-:Keywords={state.RoomInfo.World_name};{string.Join(';', state.Players)}"
-        };
-
-        AddDateTimeArgs(args, state);
-        AddCameraArgs(args, state);
-
-        return args;
-    }
-
-    private static void AddDateTimeArgs(List<string> args, State state)
-    {
-        var offset = "";
-        if (DateTime.TryParseExact(state.CreationDate, "yyyy:MM:dd HH:mm:ss", CultureInfo.CurrentCulture, DateTimeStyles.None, out var dT))
-        {
-            var offsetSpan = TimeZoneInfo.Local.GetUtcOffset(dT);
-            var sign = offsetSpan > TimeSpan.Zero ? "+" : "";
-            offset = sign + offsetSpan.ToString();
-            args.Add($"-:OffsetTime={offset}");
-            args.Add($"-:DateCreated={dT:yyyy:MM:dd}:");
-            args.Add($"-:TimeCreated={dT:HH:mm:ss}{offset}");
-        }
-
-        args.Add($"-:CreateDate={state.CreationDate}{offset}");
-        args.Add($"-:DateTimeOriginal={state.CreationDate}{offset}");
-        args.Add($"-xmp-Photoshop:DateCreated={state.CreationDate}{offset}");
-    }
-
-    private static void AddCameraArgs(List<string> args, State state)
-    {
-        args.AddRange(StateChecker.VirtualLens2.Publish(state.VirtualLens2));
-        args.AddRange(StateChecker.Integral.Publish(state.Integral));
-
-        if (!(state.VirtualLens2.Enabled || state.Integral.Enabled))
-        {
-            args.Add("-:Make=VRChat");
-            args.Add("-:Model=VRChat Camera");
-        }
-    }
 
     #endregion
 }

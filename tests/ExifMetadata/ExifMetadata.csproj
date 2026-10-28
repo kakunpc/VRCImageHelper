@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../VRCImageHelper/Tools/ExifToolCommand.cs" Link="ExifToolCommand.cs" />
+    <Compile Include="../../VRCImageHelper/Core/MetadataArguments.cs" Link="MetadataArguments.cs" />
+    <Compile Include="../../VRCImageHelper/Core/State.cs" Link="State.cs" />
+    <Compile Include="../../VRCImageHelper/Core/StateChecker/VirtualLens2.cs" Link="VirtualLens2.cs" />
+    <Compile Include="../../VRCImageHelper/Core/StateChecker/Integral.cs" Link="Integral.cs" />
+    <Compile Include="../../VRCImageHelper/Core/Config.cs" Link="Config.cs" />
+    <Compile Include="../../VRCImageHelper/Core/ConfigStorage.cs" Link="ConfigStorage.cs" />
+    <Compile Include="../SettingsMigration/Isolation.cs" Link="Isolation.cs" />
+  </ItemGroup>
+</Project>
