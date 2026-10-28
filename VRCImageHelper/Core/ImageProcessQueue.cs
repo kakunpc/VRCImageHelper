@@ -183,7 +183,7 @@ internal static class ImageProcessQueue
                         node.Value = updatedItem;
 
                         var state = item.state ?? State.Current.Clone();
-                        state.CreationDate = key.ToString("yyyy:MM:dd HH:mm:ss");
+                        state.CreationDate = MetadataArguments.FormatCreationDate(key);
 
                         Task.Run(() =>
                         {

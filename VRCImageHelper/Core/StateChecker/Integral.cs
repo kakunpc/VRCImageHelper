@@ -74,14 +74,14 @@ internal static class Integral
                 args.Add("-:LensManufacturer=suzufactory");
                 args.Add($"-:LensModel={lastItem.LensModel}");
                 args.Add($"-:XMP-microsoft:LensModel={lastItem.LensModel}");
-                args.Add($"-:FocalLength={lastItem.FocalLength}");
+                args.Add(FormattableString.Invariant($"-:FocalLength={lastItem.FocalLength}"));
                 if (lastItem.ApertureValue != 0)
-                    args.Add($"-:FNumber={lastItem.ApertureValue}");
+                    args.Add(FormattableString.Invariant($"-:FNumber={lastItem.ApertureValue}"));
                 var exposureTimes = state.ExposureState.Select((param) => param.ExposureTime);
                 var exposureTime = exposureTimes.Sum();
-                args.Add($"-:ExposureTime={exposureTime}");
+                args.Add(FormattableString.Invariant($"-:ExposureTime={exposureTime}"));
                 if (!float.IsInfinity(lastItem.ExposureBias))
-                    args.Add($"-:ExposureCompensation={lastItem.ExposureBias}");
+                    args.Add(FormattableString.Invariant($"-:ExposureCompensation={lastItem.ExposureBias}"));
 
                 // 多重露光の情報を記録
                 var exposureCount = state.ExposureState.Count;
@@ -92,7 +92,7 @@ internal static class Integral
                 else
                 {
                     args.Add("-:CompositeImage=3");
-                    args.Add($"-:CompositeImageCount=\"{exposureCount} {exposureCount}\"");
+                    args.Add(FormattableString.Invariant($"-:CompositeImageCount={exposureCount} {exposureCount}"));
                     var minimumExposureTime = exposureTimes.Min();
                     var maximumExposureTime = exposureTimes.Max();
                     var list = new List<float>() {
@@ -106,7 +106,7 @@ internal static class Integral
                         exposureCount,
                         exposureCount,
                     };
-                    args.Add($"-:CompositeImageExposureTimes=\"{string.Join(" ", list.Concat(exposureTimes))}\"");
+                    args.Add($"-:CompositeImageExposureTimes={string.Join(" ", list.Concat(exposureTimes).Select(value => value.ToString(System.Globalization.CultureInfo.InvariantCulture)))}");
                 }
             }
         }

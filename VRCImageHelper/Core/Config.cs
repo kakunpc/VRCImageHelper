@@ -1,6 +1,5 @@
 ﻿namespace VRCImageHelper.Core;
 
-using System.Text.Json;
 using System.Text.RegularExpressions;
 using VRCImageHelper.Tools;
 
@@ -53,25 +52,16 @@ internal class ConfigManager
     }
 
     /// <summary>
-    /// 取得できるConfigを更新し、JSONに保存する
+    /// 取得できるConfigを更新し、ユーザー設定XMLに保存する
     /// </summary>
     /// <param name="config"></param>
     public static void Save(Config config)
     {
-        var path = $"{Path.GetDirectoryName(Application.ExecutablePath)}\\config.json";
+        var persisted = config.Clone();
+        if (persisted.VirtualLens2.ApertureDefault > persisted.VirtualLens2.ApertureMin)
+            persisted.VirtualLens2.ApertureDefault = persisted.VirtualLens2.ApertureMin;
 
-        if (config.VirtualLens2.ApertureDefault > config.VirtualLens2.ApertureMin)
-            config.VirtualLens2.ApertureDefault = config.VirtualLens2.ApertureMin;
-
-        var result = JsonSerializer.Serialize(config);
-
-        var confDir = Path.GetDirectoryName(path);
-        if (!Directory.Exists(confDir) && confDir is not null)
-        {
-            Directory.CreateDirectory(confDir);
-        }
-
-        File.WriteAllText(path, result);
+        ConfigStorage.Save(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), persisted);
 
         if (config.VirtualLens2.ApertureDefault >= config.VirtualLens2.ApertureMin)
             config.VirtualLens2.ApertureDefault = float.PositiveInfinity;
@@ -80,19 +70,18 @@ internal class ConfigManager
     }
 
     /// <summary>
-    /// ConfigをJSONから読み出す
+    /// ユーザー設定XML（初回のみ旧JSON）からConfigを読み出す
     /// </summary>
     /// <param name="config"></param>
     public static Config Load()
     {
-        var path = $"{Path.GetDirectoryName(Application.ExecutablePath)}\\config.json";
-        var result = new Config();
+        return Load(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            Path.GetDirectoryName(Application.ExecutablePath)!);
+    }
 
-        if (File.Exists(path))
-        {
-            var source = File.ReadAllText(path);
-            result = JsonSerializer.Deserialize<Config>(source) ?? result;
-        }
+    internal static Config Load(string localApplicationData, string executableDirectory)
+    {
+        var result = ConfigStorage.Load(localApplicationData, executableDirectory);
 
         if ((result.Format == "AVIF" && FFMpeg.GetSupportedEncoder("av1").Length == 0) || (result.Format == "WEBP" && FFMpeg.GetSupportedEncoder("webp").Length == 0))
         {
@@ -147,7 +136,8 @@ internal class ConfigManager
     }
 }
 
-internal class Config
+// XmlSerializer requires public settings types; static defaults are not serialized.
+public class Config
 {
     public Config Clone()
     {
@@ -173,7 +163,7 @@ internal class Config
     public int AlphaQuality { get; set; } = 20;
     public int ParallelCompressionProcesses { get; set; } = 1;
     public VirtualLens2Config VirtualLens2 { get; set; } = new();
-    internal class VirtualLens2Config
+    public class VirtualLens2Config
     {
         public VirtualLens2Config Clone()
         {
@@ -189,7 +179,7 @@ internal class Config
         public float ExposureRange { get; set; } = 3;
     }
     public IntegralConfig Integral { get; set; } = new();
-    internal class IntegralConfig
+    public class IntegralConfig
     {
         public IntegralConfig Clone()
         {

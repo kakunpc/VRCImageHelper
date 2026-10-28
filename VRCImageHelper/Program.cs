@@ -99,10 +99,6 @@ internal static class Program
         {
             Directory.Delete(basePath + "\\ffmpeg", true);
         }
-        if (File.Exists(basePath + "\\config.json"))
-        {
-            File.Delete(basePath + "\\config.json");
-        }
         UI.SendNotify.Cleanup();
         AutoStart.Register(false);
     }

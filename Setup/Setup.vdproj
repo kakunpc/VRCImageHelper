@@ -46,10 +46,10 @@
             "ComponentsUrl" = "8:"
                 "Items"
                 {
-                    "{EDC2488A-8267-493A-A98E-7D9C3B36CDF3}:Microsoft.NetCore.CoreRuntime.6.0.x64"
+                    "{EDC2488A-8267-493A-A98E-7D9C3B36CDF3}:Microsoft.NetCore.DesktopRuntime.10.0.x64"
                     {
-                    "Name" = "8:.NET ランタイム 6.0.24 (x64)"
-                    "ProductCode" = "8:Microsoft.NetCore.CoreRuntime.6.0.x64"
+                    "Name" = "8:.NET デスクトップ ランタイム 10.0 (x64)"
+                    "ProductCode" = "8:Microsoft.NetCore.DesktopRuntime.10.0.x64"
                     }
                 }
             }
@@ -78,10 +78,10 @@
             "ComponentsUrl" = "8:"
                 "Items"
                 {
-                    "{EDC2488A-8267-493A-A98E-7D9C3B36CDF3}:Microsoft.NetCore.DesktopRuntime.6.0.x64"
+                    "{EDC2488A-8267-493A-A98E-7D9C3B36CDF3}:Microsoft.NetCore.DesktopRuntime.10.0.x64"
                     {
-                    "Name" = "8:.NET デスクトップ ランタイム 6.0.24 (x64)"
-                    "ProductCode" = "8:Microsoft.NetCore.DesktopRuntime.6.0.x64"
+                    "Name" = "8:.NET デスクトップ ランタイム 10.0 (x64)"
+                    "ProductCode" = "8:Microsoft.NetCore.DesktopRuntime.10.0.x64"
                     }
                 }
             }
@@ -135,7 +135,7 @@
                 "Name" = "8:.NET Core"
                 "Message" = "8:[VSDNETCOREMSG]"
                 "AllowLaterVersions" = "11:FALSE"
-                "InstallUrl" = "8:https://dotnet.microsoft.com/download/dotnet-core/[NetCoreVerMajorDotMinor]"
+                "InstallUrl" = "8:https://dotnet.microsoft.com/download/dotnet/10.0"
                 "IsNETCore" = "11:TRUE"
                 "Architecture" = "2:0"
                 "Runtime" = "2:0"
@@ -719,7 +719,7 @@
         {
             "{5259A561-127C-4D43-A0A1-72F10C7B3BF8}:_21FADEDBE57D412EAC1CC48D28FFFB1C"
             {
-            "SourcePath" = "8:..\\VRCImageHelper\\obj\\Debug\\net6.0-windows10.0.19041.0\\apphost.exe"
+            "SourcePath" = "8:..\\VRCImageHelper\\obj\\Debug\\net10.0-windows10.0.19041.0\\win-x64\\apphost.exe"
             "TargetName" = "8:"
             "Tag" = "8:"
             "Folder" = "8:_42BC11FB4B474DD9B968B0CE1B2EB7AE"

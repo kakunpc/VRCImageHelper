@@ -2,7 +2,6 @@
 
 using Microsoft.Toolkit.Uwp.Notifications;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -46,18 +45,34 @@ internal class ExifTool
         return dir + "\\exiftool.exe";
     }
 
-    public static async Task<bool> Copy(string source, string destination)
-    {
-        var exifTool = new ProcessStartInfo(GetExifTool()) { CreateNoWindow = true, RedirectStandardOutput = true };
-        exifTool.ArgumentList.Add("-TagsFromFile");
-        exifTool.ArgumentList.Add(source);
-        exifTool.ArgumentList.Add("-XMP");
-        exifTool.ArgumentList.Add(destination);
+    public static Task<bool> Copy(string source, string destination) =>
+        Execute(() => ExifToolCommand.CopyAsync(GetExifTool(), source, destination, s_cancellationToken));
 
-        Process? process;
+    public static Task<bool> Write(string path, List<string> args) =>
+        Execute(() => ExifToolCommand.WriteAsync(GetExifTool(), path, args, s_cancellationToken));
+
+    private static async Task<bool> Execute(Func<Task<ExifToolResult>> run)
+    {
         try
         {
-            process = Process.Start(exifTool);
+            var result = await run();
+            // Preserve diagnostics in Rider/the inherited error stream even
+            // when ExifTool reports warnings with a successful exit code.
+            if (!string.IsNullOrEmpty(result.StandardError))
+                Console.Error.Write(result.StandardError);
+            if (result.ExitCode == 0)
+                return true;
+
+            var log = result.StandardOutput + result.StandardError;
+            UI.SendNotify.Send(Properties.Resources.NotifyErrorExiftool + ":\n", false, (e) =>
+            {
+                MessageBox.Show(ToastArguments.Parse(e.Argument).Get("Message"));
+            }, new Dictionary<string, string> { { "Message", log } });
+            return false;
+        }
+        catch (OperationCanceledException) when (s_cancellationToken.IsCancellationRequested)
+        {
+            return false;
         }
         catch (Exception ex)
         {
@@ -65,76 +80,6 @@ internal class ExifTool
             {
                 MessageBox.Show(ToastArguments.Parse(e.Argument).Get("Message"));
             }, new Dictionary<string, string> { { "Message", ex.Message } });
-            return false;
-        }
-
-        if (process is null) return false;
-
-        await process.WaitForExitAsync(s_cancellationToken);
-
-        if (s_cancellationToken.IsCancellationRequested)
-            return false;
-
-        if (process.ExitCode == 0)
-        {
-            return true;
-        }
-        else
-        {
-            var log = process.StandardOutput.ReadToEnd();
-            UI.SendNotify.Send(Properties.Resources.NotifyErrorExiftool + ":\n", false, (e) =>
-            {
-                MessageBox.Show(ToastArguments.Parse(e.Argument).Get("Message"));
-            }, new Dictionary<string, string> { { "Message", log } });
-            return false;
-        }
-    }
-
-    public static async Task<bool> Write(string path, List<string> args)
-    {
-        var argsFilePath = Path.GetTempFileName();
-        var argsFile = new StreamWriter(argsFilePath);
-        argsFile.Write(string.Join("\n", args));
-        argsFile.Close();
-        var exifTool = new ProcessStartInfo(GetExifTool()) { CreateNoWindow = true ,RedirectStandardOutput = true};
-        exifTool.ArgumentList.Add(path);
-        exifTool.ArgumentList.Add("-@");
-        exifTool.ArgumentList.Add(argsFilePath);
-
-        Process? process;
-        try
-        {
-            process = Process.Start(exifTool);
-        }
-        catch (Exception ex)
-        {
-            UI.SendNotify.Send(Properties.Resources.NotifyError + ":\n" + ex.Message, false, (e) =>
-            {
-                MessageBox.Show(ToastArguments.Parse(e.Argument).Get("Message"));
-            }, new Dictionary<string, string> { { "Message", ex.Message } });
-            return false;
-        }
-
-        if (process is null) return false;
-
-        await process.WaitForExitAsync(s_cancellationToken);
-
-        if (s_cancellationToken.IsCancellationRequested)
-            return false;
-
-        if (process.ExitCode == 0)
-        {
-            argsFile.Dispose();
-            File.Delete(argsFilePath);
-            return true;
-        }
-        else
-        {
-            var log = process.StandardOutput.ReadToEnd();
-            UI.SendNotify.Send(Properties.Resources.NotifyErrorExiftool + ":\n", false, (e) =>
-            {
-                MessageBox.Show(ToastArguments.Parse(e.Argument).Get("Message"));
-            }, new Dictionary<string, string> { { "Message", log } });
             return false;
         }
     }
