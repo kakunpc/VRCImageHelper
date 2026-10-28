@@ -22,105 +22,146 @@ const string legacyJson = """
 }
 """;
 
-var tests = new (string Name, Action<string, string> Run)[]
+var tests = new (string Name, Action<string, string, string> Run)[]
 {
-    ("old settings import preserves bytes, values and existing schema upgrade", (current, legacy) =>
+    ("MSI to Rider imports values and schema without changing old JSON", (data, msi, debug) =>
     {
         var bytes = Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(legacyJson)).ToArray();
-        File.WriteAllBytes(ConfigPath(legacy), bytes);
-        var config = ConfigManager.Load(current, legacy);
+        File.WriteAllBytes(Legacy(msi), bytes);
+        var config = ConfigManager.Load(data, debug);
         Check(config.DestDir == "D:\\写真\\VRChat" && config.Quality == 73 && config.ParallelCompressionProcesses == 3);
         Check(config.Format == "WEBP" && config.Encoder == "libwebp" && config.EncoderOption == "-lossless 1");
         Check(config.AlphaFormat == "AVIF" && config.AlphaQuality == 34 && config.DeleteOriginalFile);
         Check(config.VirtualLens2.FocalLengthDefault == 85 && float.IsPositiveInfinity(config.VirtualLens2.ApertureDefault));
         Check(config.Integral.BokehShapeDefault == 2 && config.Version == 2 && config.FilePattern.Contains("%{_LAYER}%"));
-        Check(File.ReadAllBytes(ConfigPath(current)).SequenceEqual(bytes));
-        Check(File.ReadAllBytes(ConfigPath(legacy)).SequenceEqual(bytes));
+        Check(File.ReadAllBytes(Legacy(msi)).SequenceEqual(bytes) && !File.Exists(Legacy(debug)));
+        Check(File.ReadAllText(Canonical(data)).Contains("<VRCImageHelperSettings"));
     }),
-    ("current settings win even if legacy JSON is malformed", (current, legacy) =>
+    ("MSI and different Rider build locations share the canonical settings", (data, msi, debug) =>
     {
-        File.WriteAllText(ConfigPath(current), "{\"Quality\":42}");
-        File.WriteAllText(ConfigPath(legacy), "broken");
-        Check(ConfigManager.Load(current, legacy).Quality == 42);
-        Check(File.ReadAllText(ConfigPath(current)) == "{\"Quality\":42}");
-    }),
-    ("UTF-16 legacy files remain readable and byte-preserved", (current, legacy) =>
-    {
-        File.WriteAllText(ConfigPath(legacy), legacyJson, Encoding.Unicode);
-        var original = File.ReadAllBytes(ConfigPath(legacy));
-        Check(ConfigManager.Load(current, legacy).Quality == 73);
-        Check(File.ReadAllBytes(ConfigPath(current)).SequenceEqual(original));
-    }),
-    ("save then repeated launches retain current settings and do not reimport", (current, legacy) =>
-    {
-        File.WriteAllText(ConfigPath(legacy), legacyJson);
-        var config = ConfigManager.Load(current, legacy);
-        config.Quality = 91;
-        Application.ExecutablePath = Path.Combine(current, "VRCImageHelper.exe");
+        VRCImageHelper.Core.Environment.LocalApplicationData = data;
+        Application.ExecutablePath = Path.Combine(msi, "VRCImageHelper.exe");
+        var config = new Config { Quality = 67, DestDir = "shared", Version = 2 };
         ConfigManager.Save(config);
-        var saved = File.ReadAllBytes(ConfigPath(current));
-        File.WriteAllText(ConfigPath(legacy), "{\"Quality\":2}");
-        for (var i = 0; i < 3; i++)
-            Check(ConfigManager.Load(current, legacy).Quality == 91);
-        Check(File.ReadAllBytes(ConfigPath(current)).SequenceEqual(saved));
-        // The default production entry point also uses the executable directory.
-        Check(ConfigManager.Load().Quality == 91);
+        Application.ExecutablePath = Path.Combine(debug, "VRCImageHelper.exe");
+        Check(ConfigManager.Load().Quality == 67);
+        Check(ConfigManager.Load(data, Path.Combine(debug, "another-version")).Quality == 67);
+        Check(ConfigManager.Load(data, msi).DestDir == "shared");
+        Check(!File.Exists(Legacy(msi)) && !File.Exists(Legacy(debug)));
     }),
-    ("same installation directory loads without rewriting", (current, _) =>
+    ("existing canonical XML wins over different or corrupt legacy settings", (data, msi, debug) =>
     {
-        File.WriteAllText(ConfigPath(current), legacyJson);
-        Check(ConfigManager.Load(current, current).Quality == 73);
-        Check(File.ReadAllText(ConfigPath(current)) == legacyJson);
+        ConfigStorage.Save(data, new Config { Quality = 42 });
+        var original = File.ReadAllBytes(Canonical(data));
+        File.WriteAllText(Legacy(msi), "broken");
+        File.WriteAllText(Legacy(debug), legacyJson);
+        Check(ConfigManager.Load(data, debug).Quality == 42);
+        Check(File.ReadAllBytes(Canonical(data)).SequenceEqual(original));
     }),
-    ("missing settings use defaults without creating a file", (current, legacy) =>
+    ("save and repeated launches never write either legacy file", (data, msi, debug) =>
     {
-        Check(ConfigManager.Load(current, legacy).Quality == Config.Default.Quality);
-        Check(!File.Exists(ConfigPath(current)) && !File.Exists(ConfigPath(legacy)));
+        File.WriteAllText(Legacy(msi), legacyJson);
+        var config = ConfigManager.Load(data, debug);
+        config.Quality = 91;
+        VRCImageHelper.Core.Environment.LocalApplicationData = data;
+        Application.ExecutablePath = Path.Combine(debug, "VRCImageHelper.exe");
+        ConfigManager.Save(config);
+        var saved = File.ReadAllBytes(Canonical(data));
+        for (var i = 0; i < 3; i++) Check(ConfigManager.Load().Quality == 91);
+        Check(File.ReadAllBytes(Canonical(data)).SequenceEqual(saved));
+        Check(File.ReadAllText(Legacy(msi)) == legacyJson && !File.Exists(Legacy(debug)));
     }),
-    ("invalid legacy JSON is not copied or overwritten", (current, legacy) =>
+    ("executable-adjacent legacy import supports UTF-16", (data, _, debug) =>
     {
-        File.WriteAllText(ConfigPath(legacy), "broken");
-        Throws<JsonException>(() => ConfigManager.Load(current, legacy));
-        Check(!File.Exists(ConfigPath(current)) && File.ReadAllText(ConfigPath(legacy)) == "broken");
+        File.WriteAllText(Legacy(debug), legacyJson, Encoding.Unicode);
+        var original = File.ReadAllBytes(Legacy(debug));
+        Check(ConfigManager.Load(data, debug).Quality == 73);
+        Check(File.ReadAllBytes(Legacy(debug)).SequenceEqual(original));
     }),
-    ("invalid current JSON never falls back to legacy", (current, legacy) =>
+    ("different legacy candidates are rejected without choosing one", (data, msi, debug) =>
     {
-        File.WriteAllText(ConfigPath(current), "broken");
-        File.WriteAllText(ConfigPath(legacy), legacyJson);
-        Throws<JsonException>(() => ConfigManager.Load(current, legacy));
-        Check(File.ReadAllText(ConfigPath(current)) == "broken" && File.ReadAllText(ConfigPath(legacy)) == legacyJson);
+        File.WriteAllText(Legacy(msi), legacyJson);
+        File.WriteAllText(Legacy(debug), "{\"Quality\":8}");
+        Throws<InvalidDataException>(() => ConfigManager.Load(data, debug));
+        Check(!File.Exists(Canonical(data)) && File.ReadAllText(Legacy(msi)) == legacyJson);
+        Check(File.ReadAllText(Legacy(debug)) == "{\"Quality\":8}");
     }),
-    ("JSON null cannot silently become defaults", (current, legacy) =>
+    ("identical duplicate legacy files may be imported", (data, msi, debug) =>
     {
-        File.WriteAllText(ConfigPath(legacy), "null");
-        Throws<JsonException>(() => ConfigManager.Load(current, legacy));
-        Check(!File.Exists(ConfigPath(current)));
+        File.WriteAllText(Legacy(msi), legacyJson);
+        File.WriteAllText(Legacy(debug), legacyJson);
+        Check(ConfigManager.Load(data, debug).Quality == 73);
+        Check(File.ReadAllText(Legacy(msi)) == legacyJson && File.ReadAllText(Legacy(debug)) == legacyJson);
     }),
-    ("current read IO failure never falls back to legacy", (current, legacy) =>
+    ("fresh profile defaults do not write any file", (data, msi, debug) =>
     {
-        File.WriteAllText(ConfigPath(legacy), legacyJson);
-        // A directory at the destination is a deterministic cross-platform IO failure.
-        Directory.CreateDirectory(ConfigPath(current));
-        Throws<UnauthorizedAccessException>(() => ConfigManager.Load(current, legacy));
-        Check(File.ReadAllText(ConfigPath(legacy)) == legacyJson);
-        Check(!Directory.EnumerateFiles(current).Any());
+        Check(ConfigManager.Load(data, debug).Quality == Config.Default.Quality);
+        Check(!File.Exists(Canonical(data)) && !File.Exists(Legacy(msi)) && !File.Exists(Legacy(debug)));
     }),
-    ("import write failure preserves the old file and does not use defaults", (current, legacy) =>
+    ("missing or relative user-data directory cannot fall back to a build folder", (_, _, debug) =>
     {
-        File.WriteAllText(ConfigPath(legacy), legacyJson);
-        Directory.Delete(current);
-        File.WriteAllText(current, "blocked destination");
-        Throws<IOException>(() => ConfigManager.Load(current, legacy));
-        Check(File.ReadAllText(ConfigPath(legacy)) == legacyJson && File.ReadAllText(current) == "blocked destination");
+        Throws<ArgumentException>(() => ConfigStorage.Load("", debug));
+        Throws<ArgumentException>(() => ConfigStorage.Save("relative-data", new Config()));
     }),
-    ("default entry point discovers the old MSI installation", (current, _) =>
+    ("invalid legacy JSON is neither changed nor imported", (data, msi, debug) =>
     {
-        var installed = Path.Combine(TestEnvironment.Root, "LocalAppData", "Programs", "VRCImageHelper");
-        Directory.CreateDirectory(installed);
-        File.WriteAllText(ConfigPath(installed), legacyJson);
-        Application.ExecutablePath = Path.Combine(current, "VRCImageHelper.exe");
-        Check(ConfigManager.Load().Quality == 73);
-        Check(File.ReadAllText(ConfigPath(current)) == legacyJson && File.ReadAllText(ConfigPath(installed)) == legacyJson);
+        File.WriteAllText(Legacy(msi), "broken");
+        Throws<JsonException>(() => ConfigManager.Load(data, debug));
+        Check(!File.Exists(Canonical(data)) && File.ReadAllText(Legacy(msi)) == "broken");
+    }),
+    ("null legacy configuration is rejected", (data, msi, debug) =>
+    {
+        File.WriteAllText(Legacy(msi), "null");
+        Throws<InvalidDataException>(() => ConfigManager.Load(data, debug));
+        Check(!File.Exists(Canonical(data)) && File.ReadAllText(Legacy(msi)) == "null");
+    }),
+    ("corrupt canonical XML cannot fall back to legacy or be rewritten", (data, msi, debug) =>
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(Canonical(data))!);
+        File.WriteAllText(Canonical(data), "broken XML");
+        File.WriteAllText(Legacy(msi), legacyJson);
+        Throws<InvalidOperationException>(() => ConfigManager.Load(data, debug));
+        Check(File.ReadAllText(Canonical(data)) == "broken XML" && File.ReadAllText(Legacy(msi)) == legacyJson);
+    }),
+    ("canonical read failure cannot silently return defaults", (data, msi, debug) =>
+    {
+        Directory.CreateDirectory(Canonical(data));
+        File.WriteAllText(Legacy(msi), legacyJson);
+        Throws<UnauthorizedAccessException>(() => ConfigManager.Load(data, debug));
+        Check(File.ReadAllText(Legacy(msi)) == legacyJson);
+    }),
+    ("import write failure leaves the legacy file untouched", (data, msi, debug) =>
+    {
+        File.WriteAllText(Legacy(msi), legacyJson);
+        File.WriteAllText(Path.Combine(data, "nekomimiStudio"), "blocked destination");
+        Throws<IOException>(() => ConfigManager.Load(data, debug));
+        Check(File.ReadAllText(Legacy(msi)) == legacyJson && !File.Exists(Legacy(debug)));
+    }),
+    ("save serialization failure preserves canonical XML and in-memory input", (data, _, _) =>
+    {
+        ConfigStorage.Save(data, new Config { Quality = 57 });
+        var original = File.ReadAllBytes(Canonical(data));
+        var config = new Config { DestDir = "\u0001", Quality = 12 };
+        VRCImageHelper.Core.Environment.LocalApplicationData = data;
+        Throws<InvalidOperationException>(() => ConfigManager.Save(config));
+        Check(File.ReadAllBytes(Canonical(data)).SequenceEqual(original));
+        Check(float.IsPositiveInfinity(config.VirtualLens2.ApertureDefault));
+        Check(!Directory.EnumerateFiles(Path.GetDirectoryName(Canonical(data))!, "*.tmp").Any());
+    }),
+    ("concurrent initial imports do not overwrite or corrupt canonical settings", (data, msi, debug) =>
+    {
+        File.WriteAllText(Legacy(msi), legacyJson);
+        Parallel.For(0, 12, _ => Check(ConfigStorage.Load(data, debug).Quality == 73));
+        Check(ConfigManager.Load(data, debug).Quality == 73 && File.ReadAllText(Legacy(msi)) == legacyJson);
+        Check(!Directory.EnumerateFiles(Path.GetDirectoryName(Canonical(data))!, "*.tmp").Any());
+    }),
+    ("MSI launch imports its adjacent file once, without ambiguity", (data, msi, _) =>
+    {
+        File.WriteAllText(Legacy(msi), legacyJson);
+        VRCImageHelper.Core.Environment.LocalApplicationData = data;
+        Application.ExecutablePath = Path.Combine(msi, "VRCImageHelper.exe");
+        Check(ConfigManager.Load().Quality == 73 && File.Exists(Canonical(data)));
+        Check(File.ReadAllText(Legacy(msi)) == legacyJson);
     })
 };
 
@@ -130,24 +171,26 @@ try
     foreach (var test in tests)
     {
         var root = Path.Combine(TestEnvironment.Root, (++index).ToString());
-        var current = Path.Combine(root, "net10", "win-x64", "publish");
-        var legacy = Path.Combine(root, "old-net6-installation");
-        Directory.CreateDirectory(current);
-        Directory.CreateDirectory(legacy);
-        test.Run(current, legacy);
+        var data = Path.Combine(root, "LocalAppData");
+        var msi = Path.Combine(data, "Programs", "VRCImageHelper");
+        var debug = Path.Combine(root, "Rider", "bin", "Debug", "net10.0-windows", "win-x64");
+        Directory.CreateDirectory(msi);
+        Directory.CreateDirectory(debug);
+        test.Run(data, msi, debug);
         Console.WriteLine("PASS " + test.Name);
     }
-    Console.WriteLine($"{tests.Length} settings migration checks passed; no real user profile, UI, processes or sockets used.");
+    Console.WriteLine($"{tests.Length} settings checks passed; all storage is isolated in temporary folders.");
 }
 finally
 {
     if (Directory.Exists(TestEnvironment.Root)) Directory.Delete(TestEnvironment.Root, recursive: true);
 }
 
-static string ConfigPath(string directory) => Path.Combine(directory, "config.json");
+static string Legacy(string directory) => Path.Combine(directory, "config.json");
+static string Canonical(string data) => ConfigStorage.GetSettingsPath(data);
 static void Check(bool condition)
 {
-    if (!condition) throw new Exception("Settings migration assertion failed.");
+    if (!condition) throw new Exception("Settings assertion failed.");
 }
 static void Throws<T>(Action action) where T : Exception
 {
