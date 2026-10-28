@@ -1,0 +1,122 @@
+name: Build installer and draft release
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installer-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Test release version preparation
+        run: ./tests/ReleasePipeline/Check-Version.ps1
+      - name: Set version from tag (project version for validation builds)
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          $tag = $env:REF_NAME
+          if ($env:REF_TYPE -ne 'tag') {
+            [xml]$project = Get-Content VRCImageHelper/VRCImageHelper.csproj -Raw
+            $tag = 'v' + $project.SelectSingleNode('/Project/PropertyGroup/VersionPrefix').InnerText
+          }
+          $version = ./scripts/Set-ReleaseVersion.ps1 -Tag $tag
+          "RELEASE_VERSION=$version" >> $env:GITHUB_ENV
+      - name: Test world attribution
+        run: |
+          dotnet run --project tests/WorldAttribution/WorldAttribution.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'World attribution tests failed.' }
+      - name: Test settings migration
+        run: |
+          dotnet run --project tests/SettingsMigration/SettingsMigration.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Settings migration tests failed.' }
+      - name: Download official Windows ExifTool for isolated metadata tests
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'exiftool-test'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          curl.exe --fail --location --retry 3 'https://downloads.sourceforge.net/project/exiftool/exiftool-13.59_64.zip' --output "$dir/tool.zip"
+          if ($LASTEXITCODE -ne 0) { throw 'ExifTool download failed.' }
+          $hash = (Get-FileHash "$dir/tool.zip" -Algorithm SHA256).Hash
+          if ($hash -ne '44B512B25AF500724BA579D0A53C8FC5851628B692DD5E5D94AE4A15C2CBA9EC') { throw 'ExifTool archive checksum mismatch.' }
+          Expand-Archive "$dir/tool.zip" "$dir/unpacked"
+          $exe = Get-ChildItem "$dir/unpacked" -Recurse -Filter 'exiftool(-k).exe' | Select-Object -First 1
+          if (!$exe) { throw 'ExifTool executable missing from archive.' }
+          Rename-Item -LiteralPath $exe.FullName -NewName 'exiftool.exe'
+          $path = Join-Path $exe.DirectoryName 'exiftool.exe'
+          $version = & $path -ver
+          if ($LASTEXITCODE -ne 0 -or $version -ne '13.59') { throw 'Unexpected ExifTool version.' }
+          "EXIFTOOL_TEST_PATH=$path" >> $env:GITHUB_ENV
+      - name: Test metadata on generated JPEGs
+        env:
+          LC_ALL: C
+          LC_CTYPE: C
+          LANG: C
+        run: |
+          dotnet run --project tests/ExifMetadata/ExifMetadata.csproj -c Release -- "$env:EXIFTOOL_TEST_PATH"
+          if ($LASTEXITCODE -ne 0) { throw 'Metadata tests failed.' }
+      - name: Build and inspect MSI and bootstrapper
+        run: ./scripts/Build-Installer.ps1 -Version $env:RELEASE_VERSION
+      - name: Save installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: |
+            artifacts/*-installer.zip
+            artifacts/*-installer.zip.sha256
+          if-no-files-found: error
+      - name: Save installer build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-logs
+          path: artifacts/logs/
+          if-no-files-found: ignore
+
+  draft-release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: installer
+          path: installer
+      - name: Create or update draft only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Listing releases also finds drafts. API/auth failures must fail the job.
+          releases=$(gh api --paginate "repos/$GH_REPO/releases?per_page=100" --jq '.[] | {id, tag_name, draft}')
+          existing=$(printf '%s\n' "$releases" | jq -s --arg tag "$RELEASE_TAG" '[.[] | select(.tag_name == $tag)] | .[0] // empty')
+          if [[ -n "$existing" ]]; then
+            [[ $(jq -r '.draft' <<< "$existing") == true ]] || { echo 'Refusing to modify a published release.'; exit 1; }
+            gh release upload "$RELEASE_TAG" installer/* --clobber
+          else
+            gh release create "$RELEASE_TAG" installer/* --verify-tag --draft --title "VRCImageHelper $RELEASE_TAG" --generate-notes
+          fi
