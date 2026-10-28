@@ -13,7 +13,7 @@ $devenv = Join-Path $vs 'Common7/IDE/devenv.com'
 $workaround = Join-Path $vs 'Common7/IDE/CommonExtensions/Microsoft/VSI/DisableOutOfProcBuild/DisableOutOfProcBuild.exe'
 if (!(Test-Path $workaround)) { throw 'Visual Studio Installer Projects extension is missing.' }
 Push-Location $vs
-try { Invoke-Checked $workaround @($vs) } finally { Pop-Location }
+try { Invoke-Checked $workaround @() } finally { Pop-Location }
 
 Invoke-Checked 'dotnet' @('publish', 'VRCImageHelper/VRCImageHelper.csproj', '-c', 'Release', '-r', 'win-x64', '--self-contained', 'false')
 $publish = Join-Path $root 'VRCImageHelper/bin/Release/net10.0-windows10.0.19041.0/win-x64/publish'
@@ -29,7 +29,13 @@ foreach ($file in @($msi, $bootstrapper)) {
 }
 # Inspect the MSI database without running install/custom actions.
 $installer = New-Object -ComObject WindowsInstaller.Installer
-$database = $installer.OpenDatabase($msi, 0)
+$database = $installer.OpenDatabase($msi, 1)
+# Preserve the existing MsiInfo.exe -w 10 hook without depending on one SDK's
+# installation path: compressed package (2) + per-user/LUA package (8).
+$summary = $database.SummaryInformation(1)
+$summary.GetType().InvokeMember('Property', [Reflection.BindingFlags]::SetProperty, $null, $summary, @([int]15, [int]10)) | Out-Null
+$summary.Persist()
+$database.Commit()
 function Read-MsiProperty([string]$Name) {
     $view = $database.OpenView("SELECT ``Value`` FROM ``Property`` WHERE ``Property``='$Name'")
     $view.Execute()

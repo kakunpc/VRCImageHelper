@@ -31,7 +31,7 @@ $packageCode = [Guid]::NewGuid().ToString('B').ToUpperInvariant()
 $setup = Replace-One $setup '"ProductCode" = "8:\{[^}]+\}"' ('"ProductCode" = "8:' + $productCode + '"')
 $setup = Replace-One $setup '"PackageCode" = "8:\{[^}]+\}"' ('"PackageCode" = "8:' + $packageCode + '"')
 # The old post-build hook hardcodes a developer's Windows SDK path. The CI
-# build validates the generated MSI architecture directly instead.
+# build applies the equivalent per-user package flag through the MSI API.
 $setup = Replace-One $setup '(?m)^\s*"PostBuildEvent" = .*?$' '        "PostBuildEvent" = "8:"'
 $setup = $setup.Replace('obj\\Debug\\net10.0', 'obj\\Release\\net10.0')
 [IO.File]::WriteAllText($projectPath, $project, [Text.UTF8Encoding]::new($false))
