@@ -22,7 +22,7 @@ jobs:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-dotnet@v5
@@ -77,7 +77,7 @@ jobs:
       - name: Build and inspect MSI and bootstrapper
         run: ./scripts/Build-Installer.ps1 -Version $env:RELEASE_VERSION
       - name: Save installer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: installer
           path: |
@@ -86,7 +86,7 @@ jobs:
           if-no-files-found: error
       - name: Save installer build log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: installer-logs
           path: artifacts/logs/
@@ -99,7 +99,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8.0.2
         with:
           name: installer
           path: installer

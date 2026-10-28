@@ -12,7 +12,8 @@ if (!$vs) { throw 'Visual Studio 2026 with Installer Projects is required (windo
 $devenv = Join-Path $vs 'Common7/IDE/devenv.com'
 $workaround = Join-Path $vs 'Common7/IDE/CommonExtensions/Microsoft/VSI/DisableOutOfProcBuild/DisableOutOfProcBuild.exe'
 if (!(Test-Path $workaround)) { throw 'Visual Studio Installer Projects extension is missing.' }
-Invoke-Checked $workaround @()
+Push-Location $vs
+try { Invoke-Checked $workaround @($vs) } finally { Pop-Location }
 
 Invoke-Checked 'dotnet' @('publish', 'VRCImageHelper/VRCImageHelper.csproj', '-c', 'Release', '-r', 'win-x64', '--self-contained', 'false')
 $publish = Join-Path $root 'VRCImageHelper/bin/Release/net10.0-windows10.0.19041.0/win-x64/publish'
