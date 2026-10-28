@@ -262,3 +262,27 @@ dotnet run --project tests/WorldAttribution/WorldAttribution.csproj
 本番のキュー・スクリーンショットハンドラ・履歴処理をリンクするが、画像処理の出口は記録用に置換する。
 実写真や実設定への操作、実メタデータの書き換え、アプリや監視サービスの起動は行わない。
 Windowsでの実ログ・GUI・実画像による確認は別途必要。
+
+### タグからインストーラーを生成する
+
+`.github/workflows/release.yml` は `v0.9.10` のようなタグのpushで動作する。
+ワークフローを含む変更をmasterへマージしてから、そのコミットにタグを付ける。
+
+```sh
+git switch master
+git pull --ff-only
+git tag v0.9.10
+git push origin v0.9.10
+```
+
+* タグは `vMAJOR.MINOR.PATCH` の正式版形式のみ。MSIの制約により上限は `255.255.65535`。先頭ゼロ・プレリリース接尾辞は受け付けない。
+* GitHubの `windows-2025-vs2026` 環境で、バージョン準備チェック、ワールド判定、XML設定、Windows版ExifToolによる生成JPEGのテストを実行する。ExifTool 13.59の公式配布ZIPはSHA-256で固定し、CIの一時領域だけで使用する。
+* タグからアプリとMSIのバージョンを設定し、Release publishと既存のVisual Studio Installer ProjectsによるMSI・setup.exe生成を実行する。UpgradeCodeは保持し、ProductCodeはバージョンごとに固定、PackageCodeはビルドごとに更新する。変更はCIのチェックアウト内のみで、バージョン変更をリポジトリへ書き戻さない。
+* MSIはインストールせず、データベースからバージョン・UpgradeCode・x64・主要なアプリ配布ファイルの存在を検証する。
+* 全工程成功後に同じタグのGitHub Releaseを**下書き**として作り、`VRCImageHelper-<version>-win-x64-installer.zip` と `.sha256` を添付する。ZIPを展開し、`setup.exe` と `Setup.msi` を同じ場所に置いて使う。
+* 再実行時は同じタグの下書きの添付ファイルを置き換える。公開済みReleaseへの変更はエラーにして停止する。自動公開しない。
+* masterへのPRとActions画面からの手動実行でもビルドを検証できる。この場合はプロジェクトの既存バージョンを使用し、Releaseは作らない。インストーラーとビルドログはActionsのArtifactsで確認できる。
+
+Actionsがリポジトリで有効であることが必要。下書き作成ジョブだけ `contents: write` を付与し、通常ビルドは読み取り権限で実行する。追加の個人アクセストークンは不要。
+生成成功はGUIや実インストールの成功を保証しない。公開前に.NET 10 Desktop Runtimeの前提条件検出、旧版からの更新、設定引き継ぎをWindowsで確認する。
+ビルド環境のInstaller Projects拡張と.NET 10 Desktop Runtimeのbootstrapperパッケージは引き続き必要で、環境側の不足もビルド失敗として確認する。

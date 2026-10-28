@@ -135,11 +135,22 @@ string NewImage(string name)
 }
 async Task<(int Code, string Output, string Error)> Run(params string[] options)
 {
-    var start = new ProcessStartInfo(executable) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
-    foreach (var option in options) start.ArgumentList.Add(option);
+    // Windows argv uses the active code page. Match the production UTF-8
+    // argument-file transport so readback can inspect Japanese fixture paths.
+    var start = new ProcessStartInfo(executable)
+    {
+        UseShellExecute = false, RedirectStandardInput = true,
+        RedirectStandardOutput = true, RedirectStandardError = true,
+        StandardInputEncoding = new UTF8Encoding(false),
+        StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
+    };
+    start.ArgumentList.Add("-@");
+    start.ArgumentList.Add("-");
     using var process = Process.Start(start)!;
     var output = process.StandardOutput.ReadToEndAsync();
     var error = process.StandardError.ReadToEndAsync();
+    foreach (var option in options) await process.StandardInput.WriteLineAsync(option);
+    process.StandardInput.Close();
     await process.WaitForExitAsync();
     return (process.ExitCode, await output, await error);
 }
