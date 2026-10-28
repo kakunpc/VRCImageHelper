@@ -109,7 +109,7 @@ Windowsの 設定/アプリ/インストールされているアプリ からア
 
 ### 開発・ビルド (.NET 10)
 
-対象は Windows Forms (`net10.0-windows10.0.19041.0`)。Windows SDK の対象バージョン、設定JSON、画像処理、OSC、通知のコードと既存パッケージのバージョンは維持している。
+対象は Windows Forms (`net10.0-windows10.0.19041.0`)。Windows SDK の対象バージョン、設定JSONの形式、画像処理・OSC・通知のコードと既存パッケージのバージョンは維持している。設定ファイルの引き継ぎは下記の補足を参照。
 `global.json` は正式版 .NET 10.0 SDK を選択し、インストール済みの最新feature band / patchを利用する。SDKはビルド用で、実行先に必要なのはDesktop Runtime。
 アプリのRIDは `win-x64`、`SelfContained` は `false` を明示し、MSIのx64前提条件と一致させている。
 
@@ -141,7 +141,7 @@ MSIはWindows上の .NET 10対応Visual StudioとVisual Studio Installer Project
 * 出力exeがWindows x64 (PE32+) で、runtimeconfigが `Microsoft.WindowsDesktop.App` / `Microsoft.NETCore.App` 10.0.0を要求することを確認。
 * NuGetの直接・間接依存の脆弱性監査では、使用ソース (`https://api.nuget.org/v3/index.json`) に既知の脆弱性報告なし。将来の安全性を保証するものではない。
 * `Rug.Osc 1.2.5` の `NU1701` (.NET Framework向け依存) と、既存コードのnullable / 型名警告が残る。警告は抑制していない。
-* 元リポジトリに自動テストプロジェクト・CIはない。Windows GUIの実行とMSIの生成・インストール検証は未実施。
+* 元リポジトリには自動テストプロジェクト・CIがなかった。設定引き継ぎの回帰チェックを追加済み。Windows GUIの実行とMSIの生成・インストール検証は未実施。
 
 Windowsでのリリース前確認:
 
@@ -160,3 +160,27 @@ Windowsでのリリース前確認:
 * [Installer Projectsと.NET (Publish Items / Desktop Runtime前提条件)](https://learn.microsoft.com/en-us/visualstudio/deployment/installer-projects-net-core)
 
 WinFormsのDPIスケーリング変更はWindowsで要確認。BinaryFormatterの実行コードやシリアライズ済みオブジェクトのリソースはなく、危険な互換モードの有効化は不要だった。
+
+
+### 設定ファイルの引き継ぎ
+
+従来から設定は `user.config` ではなく、実行ファイルの隣の `config.json` に保存される。
+.NET 10のビルド・publish先が変わると、別フォルダにある旧設定はそのままでは読み込まれない。
+新しい実行フォルダに `config.json` がない場合だけ、旧MSIの標準インストール先
+`%LOCALAPPDATA%\Programs\VRCImageHelper\config.json` を読み込み、検証してから新しい実行フォルダへコピーする。
+旧ファイルは変更・削除せず、現在の設定があればそちらを優先する。引き継ぎ後の保存先は従来通り実行ファイルの隣。
+旧ファイルはバイト単位でコピーし、従来のUTF-8 / BOM付きUTF-16読み込みと既存の設定スキーマ更新も維持する。
+破損・アクセス拒否・コピー失敗時はエラーをそのまま伝え、初期値への置換や既存ファイルの上書きはしない。
+
+旧版をカスタムフォルダや別のビルド出力から起動していた場合は、そのフォルダの `config.json` を新しい実行ファイルの隣へコピーする必要がある（自動でディスク全体の設定を探さない）。
+MSIのアンインストールは従来から実行フォルダの設定を削除するため、旧版の削除前には設定のバックアップが必要。
+また、ffmpegが見つからない／必要なエンコーダがない場合にWEBP/AVIFをPNGへ戻す既存処理は変更していない。元のJSONを引き継いでもその挙動は残るので、新しい配置でffmpegも確認すること。
+
+設定引き継ぎの回帰チェック（Windows UIや実ユーザープロファイル、ffmpegプロセス、ネットワークは使用しない）:
+
+```sh
+dotnet run --project tests/SettingsMigration/SettingsMigration.csproj
+```
+
+.NET 10のクロスプラットフォーム用実行プロジェクトに本番の設定ソースをリンクし、UIの実行パス・LocalAppDataパスとエンコーダ検出だけをテスト用に置換する。
+一時フォルダで12件を確認: 旧JSONの値・バイト保持とスキーマ更新、現在の設定優先、保存後の繰り返し起動、同じ配置先、設定なし、UTF-16、破損JSON、JSON null、読み書き失敗、旧MSI標準パスの発見。

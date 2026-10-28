@@ -58,7 +58,7 @@ internal class ConfigManager
     /// <param name="config"></param>
     public static void Save(Config config)
     {
-        var path = $"{Path.GetDirectoryName(Application.ExecutablePath)}\\config.json";
+        var path = Path.Combine(Path.GetDirectoryName(Application.ExecutablePath)!, "config.json");
 
         if (config.VirtualLens2.ApertureDefault > config.VirtualLens2.ApertureMin)
             config.VirtualLens2.ApertureDefault = config.VirtualLens2.ApertureMin;
@@ -85,14 +85,14 @@ internal class ConfigManager
     /// <param name="config"></param>
     public static Config Load()
     {
-        var path = $"{Path.GetDirectoryName(Application.ExecutablePath)}\\config.json";
-        var result = new Config();
+        return Load(Path.GetDirectoryName(Application.ExecutablePath)!,
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Programs", "VRCImageHelper"));
+    }
 
-        if (File.Exists(path))
-        {
-            var source = File.ReadAllText(path);
-            result = JsonSerializer.Deserialize<Config>(source) ?? result;
-        }
+    internal static Config Load(string currentDirectory, string legacyDirectory)
+    {
+        var result = ConfigStorage.Load(currentDirectory, legacyDirectory);
 
         if ((result.Format == "AVIF" && FFMpeg.GetSupportedEncoder("av1").Length == 0) || (result.Format == "WEBP" && FFMpeg.GetSupportedEncoder("webp").Length == 0))
         {
