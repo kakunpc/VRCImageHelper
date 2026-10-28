@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Using Include="System.Timers.Timer" Alias="Timer" />
+    <Compile Include="../../VRCImageHelper/Core/WorldHistory.cs" Link="WorldHistory.cs" />
+    <Compile Include="../../VRCImageHelper/Core/ImageProcessQueue.cs" Link="ImageProcessQueue.cs" />
+    <Compile Include="../../VRCImageHelper/Core/SemaphoreSlimWrapper.cs" Link="SemaphoreSlimWrapper.cs" />
+    <Compile Include="../../VRCImageHelper/Core/FileWatcher.cs" Link="FileWatcher.cs" />
+    <Compile Include="../../VRCImageHelper/Core/ScreenshotWatcher.cs" Link="ScreenshotWatcher.cs" />
+    <Compile Include="../../VRCImageHelper/Core/MetadataArguments.cs" Link="MetadataArguments.cs" />
+    <Compile Include="../../VRCImageHelper/Core/State.cs" Link="State.cs" />
+    <Compile Include="../../VRCImageHelper/Core/StateChecker/VRChat.cs" Link="VRChat.cs" />
+    <Compile Include="../../VRCImageHelper/Core/StateChecker/VirtualLens2.cs" Link="VirtualLens2.cs" />
+    <Compile Include="../../VRCImageHelper/Core/StateChecker/Integral.cs" Link="Integral.cs" />
+    <Compile Include="../../VRCImageHelper/Core/Config.cs" Link="Config.cs" />
+    <Compile Include="../../VRCImageHelper/Core/ConfigStorage.cs" Link="ConfigStorage.cs" />
+    <Compile Include="../../VRCImageHelper/Utils/ParseDate.cs" Link="ParseDate.cs" />
+    <Compile Include="../SettingsMigration/Isolation.cs" Link="Isolation.cs" />
+    <Compile Include="../ExifMetadata/OscEventArgs.cs" Link="OscEventArgs.cs" />
+  </ItemGroup>
+</Project>

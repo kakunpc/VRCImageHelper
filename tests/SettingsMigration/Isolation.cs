@@ -14,9 +14,10 @@ namespace VRCImageHelper.Core
 
     internal static class Environment
     {
-        internal enum SpecialFolder { LocalApplicationData }
+        internal enum SpecialFolder { LocalApplicationData, MyPictures }
         internal static string LocalApplicationData { get; set; } = Path.Combine(TestEnvironment.Root, "initial-data");
-        internal static string GetFolderPath(SpecialFolder _) => LocalApplicationData;
+        internal static string GetFolderPath(SpecialFolder folder) => folder == SpecialFolder.LocalApplicationData
+            ? LocalApplicationData : Path.Combine(TestEnvironment.Root, "Pictures");
     }
 }
 

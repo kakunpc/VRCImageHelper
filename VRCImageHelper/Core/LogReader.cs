@@ -28,6 +28,7 @@ internal class LogReader : IDisposable
 {
     private readonly Timer _refreshTimer;
     private static readonly string s_logDir = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) + "Low\\VRChat\\VRChat\\";
+    internal static string LogDirectory => s_logDir;
     private readonly CancellationToken _cancellationToken;
     private readonly FileSystemWatcher _fsWatcher;
     private FileInfo? _logFile;

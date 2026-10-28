@@ -27,6 +27,7 @@ internal struct QueueTask
     public string path;
     public bool isProcessing = false;
     public State? state = null;
+    public bool historyUnavailableReported = false;
 }
 
 /// <summary>
@@ -37,8 +38,14 @@ internal static class ImageProcessQueue
     public static SemaphoreSlimWrapper? s_compressSemaphore;
     public static SortedDictionary<DateTime, LinkedList<QueueTask>> s_queue = new();
     private static readonly Timer s_timer;
+    private static readonly WorldHistory s_history = new(LogReader.LogDirectory);
+    private static bool s_initialized;
+    private static bool s_scanAll;
+    private static readonly StringComparer s_pathComparer = OperatingSystem.IsWindows()
+        ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+    private static readonly HashSet<string> s_completedPaths = new(s_pathComparer);
 
-    private static DateTime s_lastEnqueuedTime;
+    private static DateTime s_ignoreBefore;
     private static readonly object s_lockObject = new();
     private static readonly string s_lastProcessedTimeFile = "last_processed_time.txt";
 
@@ -46,7 +53,10 @@ internal static class ImageProcessQueue
     // 初期化メソッドを追加
     public static void Initialize(bool scanAll = false)
     {
-        s_lastEnqueuedTime = LoadLastProcessedTime(scanAll) + TimeSpan.FromMilliseconds(1);
+        s_scanAll = scanAll;
+        s_ignoreBefore = LoadLastProcessedTime(scanAll) + TimeSpan.FromMilliseconds(1);
+        s_initialized = true;
+        ResetTimer();
     }
 
     static ImageProcessQueue()
@@ -59,7 +69,6 @@ internal static class ImageProcessQueue
         {
             s_compressSemaphore = new SemaphoreSlimWrapper(ConfigManager.ParallelCompressionProcesses, ConfigManager.ParallelCompressionProcesses);
         }
-        ResetTimer();
     }
 
     private static void SaveLastProcessedTime(DateTime time)
@@ -102,17 +111,19 @@ internal static class ImageProcessQueue
 
     private static void ResetTimer()
     {
+        if (!s_initialized) return;
         s_timer.Stop();
         s_timer.Start();
     }
 
     public static void Enqueue(string path, State? state = null)
     {
+        path = Path.GetFullPath(path);
         if (ParseDate.TryParseFilePathToDateTime(path, out var timestamp))
         {
             lock (s_lockObject)
             {
-                if (timestamp < s_lastEnqueuedTime)
+                if (timestamp < s_ignoreBefore || s_completedPaths.Contains(path))
                 {
                     return;
                 }
@@ -122,10 +133,9 @@ internal static class ImageProcessQueue
                     s_queue[timestamp] = new LinkedList<QueueTask>();
                 }
 
-                if (!s_queue[timestamp].Any(item => item.path == path))
+                if (!s_queue[timestamp].Any(item => s_pathComparer.Equals(item.path, path)))
                 {
                     s_queue[timestamp].AddLast(new QueueTask(path) { state = state });
-                    s_lastEnqueuedTime = timestamp;
                 }
                 else if (state != null)
                 {
@@ -133,7 +143,7 @@ internal static class ImageProcessQueue
                     var node = s_queue[timestamp].First;
                     while (node != null)
                     {
-                        if (node.Value.path == path && node.Value.state == null)
+                        if (s_pathComparer.Equals(node.Value.path, path) && node.Value.state == null)
                         {
                             var updated = node.Value;
                             updated.SetState(state);
@@ -148,9 +158,29 @@ internal static class ImageProcessQueue
         }
     }
 
-    public static void CheckQueue()
+    public static Task[] CheckQueue()
     {
         ResetTimer();
+        var scheduled = new List<Task>();
+
+        lock (s_lockObject)
+        {
+            if (s_queue.Count == 0) return [];
+        }
+        try
+        {
+            s_history.Refresh(s_scanAll);
+        }
+        catch (IOException ex)
+        {
+            Debug.WriteLine($"World history unavailable; photos remain queued: {ex.Message}");
+            return [];
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            Debug.WriteLine($"World history unavailable; photos remain queued: {ex.Message}");
+            return [];
+        }
 
         var currentLogTime = LogReader.CurrentHead;
 
@@ -179,21 +209,30 @@ internal static class ImageProcessQueue
                     if (node != null)
                     {
                         var updatedItem = node.Value;
+                        if (!s_history.TryCreatePhotoState(key, item.state, out var state))
+                        {
+                            if (!updatedItem.historyUnavailableReported)
+                                Debug.WriteLine($"No world history at photo time; leaving untouched: {item.path}");
+                            updatedItem.historyUnavailableReported = true;
+                            node.Value = updatedItem;
+                            continue;
+                        }
                         updatedItem.SetIsProcessing(true);
                         node.Value = updatedItem;
 
-                        var state = item.state ?? State.Current.Clone();
                         state.CreationDate = MetadataArguments.FormatCreationDate(key);
 
-                        Task.Run(() =>
+                        scheduled.Add(Task.Run(() =>
                         {
                             Debug.WriteLine($"画像処理: 待機中: {item.path}");
                             using (s_compressSemaphore?.Wait())
                             {
                                 Debug.WriteLine($"画像処理: 開始: {item.path}");
+                                var succeeded = false;
                                 try
                                 {
                                     ImageProcessor.ProcessImage(item.path, state);
+                                    succeeded = true;
                                 }
                                 catch (Exception ex)
                                 {
@@ -203,6 +242,9 @@ internal static class ImageProcessQueue
                                 {
                                     lock (s_lockObject)
                                     {
+                                        // Record success before removing the queued item, so a
+                                        // delayed file/log notification cannot schedule it again.
+                                        if (succeeded) s_completedPaths.Add(item.path);
                                         if (s_queue.TryGetValue(key, out var currentTaskList))
                                         {
                                             var nodeToRemove = currentTaskList.First;
@@ -230,10 +272,11 @@ internal static class ImageProcessQueue
                                     }
                                 }
                             }
-                        });
+                        }));
                     }
                 }
             }
         }
+        return scheduled.ToArray();
     }
 }
